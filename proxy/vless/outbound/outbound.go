@@ -1,32 +1,48 @@
-// +build !confonly
-
 package outbound
 
-//go:generate go run v2ray.com/core/common/errors/errorgen
+//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
 
 import (
 	"context"
 	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/retry"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/proxy/vless"
-	"v2ray.com/core/proxy/vless/encoding"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/internet"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/retry"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/proxy/vless"
+	"github.com/v2fly/v2ray-core/v4/proxy/vless/encoding"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 func init() {
 	common.Must(common.RegisterConfig((*Config)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
 		return New(ctx, config.(*Config))
+	}))
+
+	common.Must(common.RegisterConfig((*SimplifiedConfig)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
+		simplifiedClient := config.(*SimplifiedConfig)
+		fullClient := &Config{Vnext: []*protocol.ServerEndpoint{
+			{
+				Address: simplifiedClient.Address,
+				Port:    simplifiedClient.Port,
+				User: []*protocol.User{
+					{
+						Account: serial.ToTypedMessage(&vless.Account{Id: simplifiedClient.Uuid, Encryption: "none"}),
+					},
+				},
+			},
+		}}
+
+		return common.CreateObject(ctx, fullClient)
 	}))
 }
 

@@ -1,5 +1,3 @@
-// +build !confonly
-
 package reverse
 
 import (
@@ -7,16 +5,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/mux"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/features/outbound"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/pipe"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/mux"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/features/outbound"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/pipe"
 )
 
 type Portal struct {
@@ -153,7 +152,7 @@ func (p *StaticMuxPicker) PickAvailable() (*mux.ClientWorker, error) {
 		return nil, newError("empty worker list")
 	}
 
-	var minIdx int = -1
+	var minIdx = -1
 	var minConn uint32 = 9999
 	for i, w := range p.workers {
 		if w.draining {

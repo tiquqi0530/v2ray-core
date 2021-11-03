@@ -1,22 +1,21 @@
-// +build !confonly
-
 package shadowsocks
 
 import (
 	"context"
+	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/retry"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/internet"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/retry"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 // Client is a inbound handler for Shadowsocks protocol
@@ -101,18 +100,22 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	timer := signal.CancelAfterInactivity(ctx, cancel, sessionPolicy.Timeouts.ConnectionIdle)
 
 	if request.Command == protocol.RequestCommandTCP {
-		bufferedWriter := buf.NewBufferedWriter(buf.NewWriter(conn))
-		bodyWriter, err := WriteTCPRequest(request, bufferedWriter)
-		if err != nil {
-			return newError("failed to write request").Base(err)
-		}
-
-		if err := bufferedWriter.SetBuffered(false); err != nil {
-			return err
-		}
-
 		requestDone := func() error {
 			defer timer.SetTimeout(sessionPolicy.Timeouts.DownlinkOnly)
+			bufferedWriter := buf.NewBufferedWriter(buf.NewWriter(conn))
+			bodyWriter, err := WriteTCPRequest(request, bufferedWriter)
+			if err != nil {
+				return newError("failed to write request").Base(err)
+			}
+
+			if err = buf.CopyOnceTimeout(link.Reader, bodyWriter, time.Millisecond*100); err != nil && err != buf.ErrNotTimeoutReader && err != buf.ErrReadTimeout {
+				return newError("failed to write A request payload").Base(err).AtWarning()
+			}
+
+			if err := bufferedWriter.SetBuffered(false); err != nil {
+				return err
+			}
+
 			return buf.Copy(link.Reader, bodyWriter, buf.UpdateActivity(timer))
 		}
 
@@ -127,7 +130,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 			return buf.Copy(responseReader, link.Writer, buf.UpdateActivity(timer))
 		}
 
-		var responseDoneAndCloseWriter = task.OnSuccess(responseDone, task.Close(link.Writer))
+		responseDoneAndCloseWriter := task.OnSuccess(responseDone, task.Close(link.Writer))
 		if err := task.Run(ctx, requestDone, responseDoneAndCloseWriter); err != nil {
 			return newError("connection ends").Base(err)
 		}
@@ -164,7 +167,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 			return nil
 		}
 
-		var responseDoneAndCloseWriter = task.OnSuccess(responseDone, task.Close(link.Writer))
+		responseDoneAndCloseWriter := task.OnSuccess(responseDone, task.Close(link.Writer))
 		if err := task.Run(ctx, requestDone, responseDoneAndCloseWriter); err != nil {
 			return newError("connection ends").Base(err)
 		}

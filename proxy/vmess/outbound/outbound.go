@@ -1,28 +1,30 @@
-// +build !confonly
-
 package outbound
 
-//go:generate go run v2ray.com/core/common/errors/errorgen
+//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"hash/crc64"
 	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/platform"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/retry"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/proxy/vmess"
-	"v2ray.com/core/proxy/vmess/encoding"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/internet"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/platform"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/retry"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/encoding"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 // Handler is an outbound connection handler for VMess protocol.
@@ -110,6 +112,16 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		request.Option.Set(protocol.RequestOptionGlobalPadding)
 	}
 
+	if request.Security == protocol.SecurityType_ZERO {
+		request.Security = protocol.SecurityType_NONE
+		request.Option.Clear(protocol.RequestOptionChunkStream)
+		request.Option.Clear(protocol.RequestOptionChunkMasking)
+	}
+
+	if account.AuthenticatedLengthExperiment {
+		request.Option.Set(protocol.RequestOptionAuthenticatedLength)
+	}
+
 	input := link.Reader
 	output := link.Writer
 
@@ -118,7 +130,12 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		isAEAD = true
 	}
 
-	session := encoding.NewClientSession(ctx, isAEAD, protocol.DefaultIDHash)
+	hashkdf := hmac.New(sha256.New, []byte("VMessBF"))
+	hashkdf.Write(account.ID.Bytes())
+
+	behaviorSeed := crc64.Checksum(hashkdf.Sum(nil), crc64.MakeTable(crc64.ISO))
+
+	session := encoding.NewClientSession(ctx, isAEAD, protocol.DefaultIDHash, int64(behaviorSeed))
 	sessionPolicy := h.policyManager.ForLevel(request.User.Level)
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -145,7 +162,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 			return err
 		}
 
-		if request.Option.Has(protocol.RequestOptionChunkStream) {
+		if request.Option.Has(protocol.RequestOptionChunkStream) && !account.NoTerminationSignal {
 			if err := bodyWriter.WriteMultiBuffer(buf.MultiBuffer{}); err != nil {
 				return err
 			}
@@ -169,7 +186,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		return buf.Copy(bodyReader, output, buf.UpdateActivity(timer))
 	}
 
-	var responseDonePost = task.OnSuccess(responseDone, task.Close(output))
+	responseDonePost := task.OnSuccess(responseDone, task.Close(output))
 	if err := task.Run(ctx, requestDone, responseDonePost); err != nil {
 		return newError("connection ends").Base(err)
 	}
@@ -189,6 +206,23 @@ func shouldEnablePadding(s protocol.SecurityType) bool {
 func init() {
 	common.Must(common.RegisterConfig((*Config)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
 		return New(ctx, config.(*Config))
+	}))
+
+	common.Must(common.RegisterConfig((*SimplifiedConfig)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
+		simplifiedClient := config.(*SimplifiedConfig)
+		fullClient := &Config{Receiver: []*protocol.ServerEndpoint{
+			{
+				Address: simplifiedClient.Address,
+				Port:    simplifiedClient.Port,
+				User: []*protocol.User{
+					{
+						Account: serial.ToTypedMessage(&vmess.Account{Id: simplifiedClient.Uuid}),
+					},
+				},
+			},
+		}}
+
+		return common.CreateObject(ctx, fullClient)
 	}))
 
 	const defaultFlagValue = "NOT_DEFINED_AT_ALL"

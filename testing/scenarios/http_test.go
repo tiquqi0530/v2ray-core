@@ -5,23 +5,23 @@ import (
 	"context"
 	"crypto/rand"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"v2ray.com/core"
-	"v2ray.com/core/app/proxyman"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/serial"
-	"v2ray.com/core/proxy/freedom"
-	v2http "v2ray.com/core/proxy/http"
-	v2httptest "v2ray.com/core/testing/servers/http"
-	"v2ray.com/core/testing/servers/tcp"
+
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/app/proxyman"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/proxy/freedom"
+	v2http "github.com/v2fly/v2ray-core/v4/proxy/http"
+	v2httptest "github.com/v2fly/v2ray-core/v4/testing/servers/http"
+	"github.com/v2fly/v2ray-core/v4/testing/servers/tcp"
 )
 
 func TestHttpConformance(t *testing.T) {
@@ -74,7 +74,7 @@ func TestHttpConformance(t *testing.T) {
 			t.Fatal("status: ", resp.StatusCode)
 		}
 
-		content, err := ioutil.ReadAll(resp.Body)
+		content, err := io.ReadAll(resp.Body)
 		common.Must(err)
 		if string(content) != "Home" {
 			t.Fatal("body: ", string(content))
@@ -270,7 +270,7 @@ func TestHttpPost(t *testing.T) {
 			t.Fatal("status: ", resp.StatusCode)
 		}
 
-		content, err := ioutil.ReadAll(resp.Body)
+		content, err := io.ReadAll(resp.Body)
 		common.Must(err)
 		if r := cmp.Diff(content, xor(payload)); r != "" {
 			t.Fatal(r)
@@ -367,7 +367,7 @@ func TestHttpBasicAuth(t *testing.T) {
 				t.Fatal("status: ", resp.StatusCode)
 			}
 
-			content, err := ioutil.ReadAll(resp.Body)
+			content, err := io.ReadAll(resp.Body)
 			common.Must(err)
 			if string(content) != "Home" {
 				t.Fatal("body: ", string(content))

@@ -1,3 +1,4 @@
+//go:build freebsd
 // +build freebsd
 
 package udp
@@ -7,8 +8,8 @@ import (
 	"encoding/gob"
 	"io"
 
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 // RetrieveOriginalDest from stored laddr, caddr

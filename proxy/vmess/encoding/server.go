@@ -9,21 +9,21 @@ import (
 	"encoding/binary"
 	"hash/fnv"
 	"io"
-	"io/ioutil"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/bitmask"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/crypto"
-	"v2ray.com/core/common/dice"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/proxy/vmess"
-	vmessaead "v2ray.com/core/proxy/vmess/aead"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/bitmask"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/crypto"
+	"github.com/v2fly/v2ray-core/v4/common/drain"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	vmessaead "github.com/v2fly/v2ray-core/v4/proxy/vmess/aead"
 )
 
 type sessionID struct {
@@ -118,6 +118,11 @@ func NewServerSession(validator *vmess.TimedUserValidator, sessionHistory *Sessi
 	}
 }
 
+// SetAEADForced sets isAEADForced for a ServerSession.
+func (s *ServerSession) SetAEADForced(isAEADForced bool) {
+	s.isAEADForced = isAEADForced
+}
+
 func parseSecurityType(b byte) protocol.SecurityType {
 	if _, f := protocol.SecurityType_name[int32(b)]; f {
 		st := protocol.SecurityType(b)
@@ -133,24 +138,16 @@ func parseSecurityType(b byte) protocol.SecurityType {
 // DecodeRequestHeader decodes and returns (if successful) a RequestHeader from an input stream.
 func (s *ServerSession) DecodeRequestHeader(reader io.Reader) (*protocol.RequestHeader, error) {
 	buffer := buf.New()
-	behaviorRand := dice.NewDeterministicDice(int64(s.userValidator.GetBehaviorSeed()))
-	BaseDrainSize := behaviorRand.Roll(3266)
-	RandDrainMax := behaviorRand.Roll(64) + 1
-	RandDrainRolled := dice.Roll(RandDrainMax)
-	DrainSize := BaseDrainSize + 16 + 38 + RandDrainRolled
-	readSizeRemain := DrainSize
+
+	drainer, err := drain.NewBehaviorSeedLimitedDrainer(int64(s.userValidator.GetBehaviorSeed()), 16+38, 3266, 64)
+	if err != nil {
+		return nil, newError("failed to initialize drainer").Base(err)
+	}
 
 	drainConnection := func(e error) error {
 		// We read a deterministic generated length of data before closing the connection to offset padding read pattern
-		readSizeRemain -= int(buffer.Len())
-		if readSizeRemain > 0 {
-			err := s.DrainConnN(reader, readSizeRemain)
-			if err != nil {
-				return newError("failed to drain connection DrainSize = ", BaseDrainSize, " ", RandDrainMax, " ", RandDrainRolled).Base(err).Base(e)
-			}
-			return newError("connection drained DrainSize = ", BaseDrainSize, " ", RandDrainMax, " ", RandDrainRolled).Base(e)
-		}
-		return e
+		drainer.AcknowledgeReceive(int(buffer.Len()))
+		return drain.WithError(drainer, reader, e)
 	}
 
 	defer func() {
@@ -177,7 +174,7 @@ func (s *ServerSession) DecodeRequestHeader(reader io.Reader) (*protocol.Request
 		aeadData, shouldDrain, bytesRead, errorReason := vmessaead.OpenVMessAEADHeader(fixedSizeCmdKey, fixedSizeAuthID, reader)
 		if errorReason != nil {
 			if shouldDrain {
-				readSizeRemain -= bytesRead
+				drainer.AcknowledgeReceive(bytesRead)
 				return nil, drainConnection(newError("AEAD read failed").Base(errorReason))
 			}
 			return nil, drainConnection(newError("AEAD read failed, drain skipped").Base(errorReason))
@@ -185,10 +182,16 @@ func (s *ServerSession) DecodeRequestHeader(reader io.Reader) (*protocol.Request
 		decryptor = bytes.NewReader(aeadData)
 		s.isAEADRequest = true
 
-	case !s.isAEADForced && errorAEAD == vmessaead.ErrNotFound:
+	case errorAEAD == vmessaead.ErrNotFound:
 		userLegacy, timestamp, valid, userValidationError := s.userValidator.Get(buffer.Bytes())
 		if !valid || userValidationError != nil {
 			return nil, drainConnection(newError("invalid user").Base(userValidationError))
+		}
+		if s.isAEADForced {
+			return nil, drainConnection(newError("invalid user: VMessAEAD is enforced and a non VMessAEAD connection is received. You can still disable this security feature with environment variable v2ray.vmess.aead.forced = false . You will not be able to enable legacy header workaround in the future."))
+		}
+		if s.userValidator.ShouldShowLegacyWarn() {
+			newError("Critical Warning: potentially invalid user: a non VMessAEAD connection is received. From 2022 Jan 1st, this kind of connection will be rejected by default. You should update or replace your client software now. This message will not be shown for further violation on this inbound.").AtWarning().WriteToLog()
 		}
 		user = userLegacy
 		iv := hashTimestamp(md5.New(), timestamp)
@@ -201,7 +204,7 @@ func (s *ServerSession) DecodeRequestHeader(reader io.Reader) (*protocol.Request
 		return nil, drainConnection(newError("invalid user").Base(errorAEAD))
 	}
 
-	readSizeRemain -= int(buffer.Len())
+	drainer.AcknowledgeReceive(int(buffer.Len()))
 	buffer.Clear()
 	if _, err := buffer.ReadFullFrom(decryptor, 38); err != nil {
 		return nil, newError("failed to read request header").Base(err)
@@ -348,6 +351,17 @@ func (s *ServerSession) DecodeRequestBody(request *protocol.RequestHeader, reade
 			NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
 			AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
 		}
+		if request.Option.Has(protocol.RequestOptionAuthenticatedLength) {
+			AuthenticatedLengthKey := vmessaead.KDF16(s.requestBodyKey[:], "auth_len")
+			AuthenticatedLengthKeyAEAD := crypto.NewAesGcm(AuthenticatedLengthKey)
+
+			lengthAuth := &crypto.AEADAuthenticator{
+				AEAD:                    AuthenticatedLengthKeyAEAD,
+				NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
+				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+			}
+			sizeParser = NewAEADSizeParser(lengthAuth)
+		}
 		return crypto.NewAuthenticationReader(auth, sizeParser, reader, request.Command.TransferType(), padding)
 
 	case protocol.SecurityType_CHACHA20_POLY1305:
@@ -357,6 +371,18 @@ func (s *ServerSession) DecodeRequestBody(request *protocol.RequestHeader, reade
 			AEAD:                    aead,
 			NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
 			AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+		}
+		if request.Option.Has(protocol.RequestOptionAuthenticatedLength) {
+			AuthenticatedLengthKey := vmessaead.KDF16(s.requestBodyKey[:], "auth_len")
+			AuthenticatedLengthKeyAEAD, err := chacha20poly1305.New(GenerateChacha20Poly1305Key(AuthenticatedLengthKey))
+			common.Must(err)
+
+			lengthAuth := &crypto.AEADAuthenticator{
+				AEAD:                    AuthenticatedLengthKeyAEAD,
+				NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
+				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+			}
+			sizeParser = NewAEADSizeParser(lengthAuth)
 		}
 		return crypto.NewAuthenticationReader(auth, sizeParser, reader, request.Command.TransferType(), padding)
 
@@ -466,6 +492,17 @@ func (s *ServerSession) EncodeResponseBody(request *protocol.RequestHeader, writ
 			NonceGenerator:          GenerateChunkNonce(s.responseBodyIV[:], uint32(aead.NonceSize())),
 			AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
 		}
+		if request.Option.Has(protocol.RequestOptionAuthenticatedLength) {
+			AuthenticatedLengthKey := vmessaead.KDF16(s.requestBodyKey[:], "auth_len")
+			AuthenticatedLengthKeyAEAD := crypto.NewAesGcm(AuthenticatedLengthKey)
+
+			lengthAuth := &crypto.AEADAuthenticator{
+				AEAD:                    AuthenticatedLengthKeyAEAD,
+				NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
+				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+			}
+			sizeParser = NewAEADSizeParser(lengthAuth)
+		}
 		return crypto.NewAuthenticationWriter(auth, sizeParser, writer, request.Command.TransferType(), padding)
 
 	case protocol.SecurityType_CHACHA20_POLY1305:
@@ -476,14 +513,21 @@ func (s *ServerSession) EncodeResponseBody(request *protocol.RequestHeader, writ
 			NonceGenerator:          GenerateChunkNonce(s.responseBodyIV[:], uint32(aead.NonceSize())),
 			AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
 		}
+		if request.Option.Has(protocol.RequestOptionAuthenticatedLength) {
+			AuthenticatedLengthKey := vmessaead.KDF16(s.requestBodyKey[:], "auth_len")
+			AuthenticatedLengthKeyAEAD, err := chacha20poly1305.New(GenerateChacha20Poly1305Key(AuthenticatedLengthKey))
+			common.Must(err)
+
+			lengthAuth := &crypto.AEADAuthenticator{
+				AEAD:                    AuthenticatedLengthKeyAEAD,
+				NonceGenerator:          GenerateChunkNonce(s.requestBodyIV[:], uint32(aead.NonceSize())),
+				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+			}
+			sizeParser = NewAEADSizeParser(lengthAuth)
+		}
 		return crypto.NewAuthenticationWriter(auth, sizeParser, writer, request.Command.TransferType(), padding)
 
 	default:
 		panic("Unknown security type.")
 	}
-}
-
-func (s *ServerSession) DrainConnN(reader io.Reader, n int) error {
-	_, err := io.CopyN(ioutil.Discard, reader, int64(n))
-	return err
 }

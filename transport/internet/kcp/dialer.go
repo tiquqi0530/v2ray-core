@@ -1,5 +1,3 @@
-// +build !confonly
-
 package kcp
 
 import (
@@ -7,17 +5,15 @@ import (
 	"io"
 	"sync/atomic"
 
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/dice"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/dice"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
 )
 
-var (
-	globalConv = uint32(dice.RollUint16())
-)
+var globalConv = uint32(dice.RollUint16())
 
 func fetchInput(_ context.Context, input io.Reader, reader PacketReader, conn *Connection) {
 	cache := make(chan *buf.Buffer, 1024)

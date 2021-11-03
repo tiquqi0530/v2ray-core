@@ -5,26 +5,28 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/anypb"
 
-	"v2ray.com/core"
-	"v2ray.com/core/app/log"
-	"v2ray.com/core/app/policy"
-	"v2ray.com/core/app/proxyman"
-	"v2ray.com/core/app/reverse"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common"
-	clog "v2ray.com/core/common/log"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/serial"
-	"v2ray.com/core/common/uuid"
-	"v2ray.com/core/proxy/blackhole"
-	"v2ray.com/core/proxy/dokodemo"
-	"v2ray.com/core/proxy/freedom"
-	"v2ray.com/core/proxy/vmess"
-	"v2ray.com/core/proxy/vmess/inbound"
-	"v2ray.com/core/proxy/vmess/outbound"
-	"v2ray.com/core/testing/servers/tcp"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/app/log"
+	"github.com/v2fly/v2ray-core/v4/app/policy"
+	"github.com/v2fly/v2ray-core/v4/app/proxyman"
+	"github.com/v2fly/v2ray-core/v4/app/reverse"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/app/router/routercommon"
+	"github.com/v2fly/v2ray-core/v4/common"
+	clog "github.com/v2fly/v2ray-core/v4/common/log"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/uuid"
+	"github.com/v2fly/v2ray-core/v4/proxy/blackhole"
+	"github.com/v2fly/v2ray-core/v4/proxy/dokodemo"
+	"github.com/v2fly/v2ray-core/v4/proxy/freedom"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/inbound"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/outbound"
+	"github.com/v2fly/v2ray-core/v4/testing/servers/tcp"
 )
 
 func TestReverseProxy(t *testing.T) {
@@ -41,20 +43,20 @@ func TestReverseProxy(t *testing.T) {
 	reversePort := tcp.PickPort()
 
 	serverConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&reverse.Config{
 				PortalConfig: []*reverse.PortalConfig{
 					{
 						Tag:    "portal",
-						Domain: "test.v2ray.com",
+						Domain: "test.v2fly.org",
 					},
 				},
 			}),
 			serial.ToTypedMessage(&router.Config{
 				Rule: []*router.RoutingRule{
 					{
-						Domain: []*router.Domain{
-							{Type: router.Domain_Full, Value: "test.v2ray.com"},
+						Domain: []*routercommon.Domain{
+							{Type: routercommon.Domain_Full, Value: "test.v2fly.org"},
 						},
 						TargetTag: &router.RoutingRule_Tag{
 							Tag: "portal",
@@ -110,20 +112,20 @@ func TestReverseProxy(t *testing.T) {
 
 	clientPort := tcp.PickPort()
 	clientConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&reverse.Config{
 				BridgeConfig: []*reverse.BridgeConfig{
 					{
 						Tag:    "bridge",
-						Domain: "test.v2ray.com",
+						Domain: "test.v2fly.org",
 					},
 				},
 			}),
 			serial.ToTypedMessage(&router.Config{
 				Rule: []*router.RoutingRule{
 					{
-						Domain: []*router.Domain{
-							{Type: router.Domain_Full, Value: "test.v2ray.com"},
+						Domain: []*routercommon.Domain{
+							{Type: routercommon.Domain_Full, Value: "test.v2fly.org"},
 						},
 						TargetTag: &router.RoutingRule_Tag{
 							Tag: "reverse",
@@ -212,10 +214,9 @@ func TestReverseProxyLongRunning(t *testing.T) {
 	reversePort := tcp.PickPort()
 
 	serverConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&log.Config{
-				ErrorLogLevel: clog.Severity_Warning,
-				ErrorLogType:  log.LogType_Console,
+				Error: &log.LogSpecification{Level: clog.Severity_Debug, Type: log.LogType_Console},
 			}),
 			serial.ToTypedMessage(&policy.Config{
 				Level: map[uint32]*policy.Policy{
@@ -231,15 +232,15 @@ func TestReverseProxyLongRunning(t *testing.T) {
 				PortalConfig: []*reverse.PortalConfig{
 					{
 						Tag:    "portal",
-						Domain: "test.v2ray.com",
+						Domain: "test.v2fly.org",
 					},
 				},
 			}),
 			serial.ToTypedMessage(&router.Config{
 				Rule: []*router.RoutingRule{
 					{
-						Domain: []*router.Domain{
-							{Type: router.Domain_Full, Value: "test.v2ray.com"},
+						Domain: []*routercommon.Domain{
+							{Type: routercommon.Domain_Full, Value: "test.v2fly.org"},
 						},
 						TargetTag: &router.RoutingRule_Tag{
 							Tag: "portal",
@@ -295,10 +296,9 @@ func TestReverseProxyLongRunning(t *testing.T) {
 
 	clientPort := tcp.PickPort()
 	clientConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&log.Config{
-				ErrorLogLevel: clog.Severity_Warning,
-				ErrorLogType:  log.LogType_Console,
+				Error: &log.LogSpecification{Level: clog.Severity_Debug, Type: log.LogType_Console},
 			}),
 			serial.ToTypedMessage(&policy.Config{
 				Level: map[uint32]*policy.Policy{
@@ -314,15 +314,15 @@ func TestReverseProxyLongRunning(t *testing.T) {
 				BridgeConfig: []*reverse.BridgeConfig{
 					{
 						Tag:    "bridge",
-						Domain: "test.v2ray.com",
+						Domain: "test.v2fly.org",
 					},
 				},
 			}),
 			serial.ToTypedMessage(&router.Config{
 				Rule: []*router.RoutingRule{
 					{
-						Domain: []*router.Domain{
-							{Type: router.Domain_Full, Value: "test.v2ray.com"},
+						Domain: []*routercommon.Domain{
+							{Type: routercommon.Domain_Full, Value: "test.v2fly.org"},
 						},
 						TargetTag: &router.RoutingRule_Tag{
 							Tag: "reverse",

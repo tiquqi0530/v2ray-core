@@ -1,12 +1,10 @@
-// +build !confonly
-
 package trojan
 
 import (
 	"strings"
 	"sync"
 
-	"v2ray.com/core/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
 )
 
 // Validator stores valid trojan users.

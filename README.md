@@ -21,8 +21,6 @@
 > If you are willing to package V2Ray for other distros/platforms, please let us know or seek for help via [GitHub issues](https://github.com/v2fly/v2ray-core/issues).
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/v2ray.svg)](https://repology.org/project/v2ray/versions)
-[![Packaging status](https://repology.org/badge/vertical-allrepos/go:v2ray-core.svg)](https://repology.org/project/go:v2ray-core/versions)
-[![Packaging status](https://repology.org/badge/vertical-allrepos/v2ray-core.svg)](https://repology.org/project/v2ray-core/versions)
 
 ## License
 
@@ -38,6 +36,9 @@ This repo relies on the following third-party projects:
   - [pires/go-proxyproto](https://github.com/pires/go-proxyproto)
   - [seiflotfy/cuckoofilter](https://github.com/seiflotfy/cuckoofilter)
   - [google/starlark-go](https://github.com/google/starlark-go)
+  - [jhump/protoreflect](https://github.com/jhump/protoreflect)
+  - [inetaf/netaddr](https://github.com/inetaf/netaddr)
+
 - For testing only:
   - [miekg/dns](https://github.com/miekg/dns)
   - [h12w/socks](https://github.com/h12w/socks)

@@ -1,8 +1,6 @@
-// +build !confonly
-
 package inbound
 
-//go:generate go run v2ray.com/core/common/errors/errorgen
+//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
 
 import (
 	"context"
@@ -11,23 +9,25 @@ import (
 	"sync"
 	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/errors"
-	"v2ray.com/core/common/log"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/common/uuid"
-	feature_inbound "v2ray.com/core/features/inbound"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/features/routing"
-	"v2ray.com/core/proxy/vmess"
-	"v2ray.com/core/proxy/vmess/encoding"
-	"v2ray.com/core/transport/internet"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/errors"
+	"github.com/v2fly/v2ray-core/v4/common/log"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/platform"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/common/uuid"
+	feature_inbound "github.com/v2fly/v2ray-core/v4/features/inbound"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/encoding"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 type userByEmail struct {
@@ -202,7 +202,9 @@ func transferResponse(timer signal.ActivityUpdater, session *encoding.ServerSess
 		return err
 	}
 
-	if request.Option.Has(protocol.RequestOptionChunkStream) {
+	account := request.User.Account.(*vmess.MemoryAccount)
+
+	if request.Option.Has(protocol.RequestOptionChunkStream) && !account.NoTerminationSignal {
 		if err := bodyWriter.WriteMultiBuffer(buf.MultiBuffer{}); err != nil {
 			return err
 		}
@@ -224,6 +226,7 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection i
 
 	reader := &buf.BufferedReader{Reader: buf.NewReader(connection)}
 	svrSession := encoding.NewServerSession(h.clients, h.sessionHistory)
+	svrSession.SetAEADForced(aeadForced)
 	request, err := svrSession.DecodeRequestHeader(reader)
 	if err != nil {
 		if errors.Cause(err) != io.EOF {
@@ -304,7 +307,7 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection i
 		return transferResponse(timer, svrSession, request, response, link.Reader, writer)
 	}
 
-	var requestDonePost = task.OnSuccess(requestDone, task.Close(link.Writer))
+	requestDonePost := task.OnSuccess(requestDone, task.Close(link.Writer))
 	if err := task.Run(ctx, requestDonePost, responseDone); err != nil {
 		common.Interrupt(link.Reader)
 		common.Interrupt(link.Writer)
@@ -350,8 +353,46 @@ func (h *Handler) generateCommand(ctx context.Context, request *protocol.Request
 	return nil
 }
 
+var (
+	aeadForced     = false
+	aeadForced2022 = false
+)
+
 func init() {
 	common.Must(common.RegisterConfig((*Config)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
 		return New(ctx, config.(*Config))
 	}))
+
+	common.Must(common.RegisterConfig((*SimplifiedConfig)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
+		simplifiedServer := config.(*SimplifiedConfig)
+		fullConfig := &Config{
+			User: func() (users []*protocol.User) {
+				for _, v := range simplifiedServer.Users {
+					account := &vmess.Account{Id: v}
+					users = append(users, &protocol.User{
+						Account: serial.ToTypedMessage(account),
+					})
+				}
+				return
+			}(),
+		}
+
+		return common.CreateObject(ctx, fullConfig)
+	}))
+
+	defaultFlagValue := "NOT_DEFINED_AT_ALL"
+
+	if time.Now().Year() >= 2022 {
+		defaultFlagValue = "true_by_default_2022"
+	}
+
+	isAeadForced := platform.NewEnvFlag("v2ray.vmess.aead.forced").GetValue(func() string { return defaultFlagValue })
+	if isAeadForced == "true" {
+		aeadForced = true
+	}
+
+	if isAeadForced == "true_by_default_2022" {
+		aeadForced = true
+		aeadForced2022 = true
+	}
 }

@@ -1,27 +1,23 @@
-// +build !confonly
-
 package http
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
-	http_proto "v2ray.com/core/common/protocol/http"
-	"v2ray.com/core/common/serial"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal/done"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	http_proto "github.com/v2fly/v2ray-core/v4/common/protocol/http"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal/done"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
 )
 
 type Listener struct {
@@ -38,7 +34,6 @@ func (l *Listener) Addr() net.Addr {
 
 func (l *Listener) Close() error {
 	if l.locker != nil {
-		fmt.Fprintln(os.Stderr, "RELEASE LOCK")
 		l.locker.Release()
 	}
 	return l.server.Close()
@@ -74,6 +69,13 @@ func (l *Listener) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	writer.Header().Set("Cache-Control", "no-store")
+
+	for _, httpHeader := range l.config.Header {
+		for _, httpHeaderValue := range httpHeader.Value {
+			writer.Header().Set(httpHeader.Name, httpHeaderValue)
+		}
+	}
+
 	writer.WriteHeader(200)
 	if f, ok := writer.(http.Flusher); ok {
 		f.Flush()
@@ -90,11 +92,11 @@ func (l *Listener) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		}
 	}
 
-	forwardedAddrs := http_proto.ParseXForwardedFor(request.Header)
-	if len(forwardedAddrs) > 0 && forwardedAddrs[0].Family().IsIP() {
+	forwardedAddress := http_proto.ParseXForwardedFor(request.Header)
+	if len(forwardedAddress) > 0 && forwardedAddress[0].Family().IsIP() {
 		remoteAddr = &net.TCPAddr{
-			IP:   forwardedAddrs[0].IP(),
-			Port: int(0),
+			IP:   forwardedAddress[0].IP(),
+			Port: 0,
 		}
 	}
 
@@ -166,7 +168,7 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 				Net:  "unix",
 			}, streamSettings.SocketSettings)
 			if err != nil {
-				newError("failed to listen on ", address).Base(err).WriteToLog(session.ExportIDToError(ctx))
+				newError("failed to listen on ", address).Base(err).AtError().WriteToLog(session.ExportIDToError(ctx))
 				return
 			}
 			locker := ctx.Value(address.Domain())
@@ -179,7 +181,7 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 				Port: int(port),
 			}, streamSettings.SocketSettings)
 			if err != nil {
-				newError("failed to listen on ", address, ":", port).Base(err).WriteToLog(session.ExportIDToError(ctx))
+				newError("failed to listen on ", address, ":", port).Base(err).AtError().WriteToLog(session.ExportIDToError(ctx))
 				return
 			}
 		}
@@ -187,12 +189,12 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 		if config == nil {
 			err = server.Serve(streamListener)
 			if err != nil {
-				newError("stoping serving H2C").Base(err).WriteToLog(session.ExportIDToError(ctx))
+				newError("stopping serving H2C").Base(err).WriteToLog(session.ExportIDToError(ctx))
 			}
 		} else {
 			err = server.ServeTLS(streamListener, "", "")
 			if err != nil {
-				newError("stoping serving TLS").Base(err).WriteToLog(session.ExportIDToError(ctx))
+				newError("stopping serving TLS").Base(err).WriteToLog(session.ExportIDToError(ctx))
 			}
 		}
 	}()

@@ -1,5 +1,3 @@
-// +build !confonly
-
 package socks
 
 import (
@@ -7,21 +5,21 @@ import (
 	"io"
 	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/log"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	udp_proto "v2ray.com/core/common/protocol/udp"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/features"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/features/routing"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/udp"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/log"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	udp_proto "github.com/v2fly/v2ray-core/v4/common/protocol/udp"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/features"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/udp"
 )
 
 // Server is a SOCKS 5 proxy server
@@ -91,8 +89,10 @@ func (s *Server) processTCP(ctx context.Context, conn internet.Connection, dispa
 	}
 
 	svrSession := &ServerSession{
-		config: s.config,
-		port:   inbound.Gateway.Port,
+		config:        s.config,
+		address:       inbound.Gateway.Address,
+		port:          inbound.Gateway.Port,
+		clientAddress: inbound.Source.Address,
 	}
 
 	reader := &buf.BufferedReader{Reader: buf.NewReader(conn)}
@@ -175,7 +175,7 @@ func (s *Server) transport(ctx context.Context, reader io.Reader, writer io.Writ
 		return nil
 	}
 
-	var requestDonePost = task.OnSuccess(requestDone, task.Close(link.Writer))
+	requestDonePost := task.OnSuccess(requestDone, task.Close(link.Writer))
 	if err := task.Run(ctx, requestDonePost, responseDone); err != nil {
 		common.Interrupt(link.Reader)
 		common.Interrupt(link.Writer)
@@ -218,7 +218,6 @@ func (s *Server) handleUDPPayload(ctx context.Context, conn internet.Connection,
 
 		for _, payload := range mpayload {
 			request, err := DecodeUDPPacket(payload)
-
 			if err != nil {
 				newError("failed to parse UDP request").Base(err).WriteToLog(session.ExportIDToError(ctx))
 				payload.Release()

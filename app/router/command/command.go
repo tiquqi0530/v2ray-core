@@ -1,24 +1,58 @@
-// +build !confonly
-
 package command
 
-//go:generate go run v2ray.com/core/common/errors/errorgen
+//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
 
 import (
 	"context"
 	"time"
 
 	"google.golang.org/grpc"
-	"v2ray.com/core"
-	"v2ray.com/core/common"
-	"v2ray.com/core/features/routing"
-	"v2ray.com/core/features/stats"
+
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
+	"github.com/v2fly/v2ray-core/v4/features/stats"
 )
 
 // routingServer is an implementation of RoutingService.
 type routingServer struct {
 	router       routing.Router
 	routingStats stats.Channel
+}
+
+func (s *routingServer) GetBalancerInfo(ctx context.Context, request *GetBalancerInfoRequest) (*GetBalancerInfoResponse, error) {
+	var ret GetBalancerInfoResponse
+	ret.Balancer = &BalancerMsg{}
+	if bo, ok := s.router.(routing.BalancerOverrider); ok {
+		{
+			res, err := bo.GetOverrideTarget(request.GetTag())
+			if err != nil {
+				return nil, err
+			}
+			ret.Balancer.Override = &OverrideInfo{
+				Target: res,
+			}
+		}
+	}
+
+	if pt, ok := s.router.(routing.BalancerPrincipleTarget); ok {
+		{
+			res, err := pt.GetPrincipleTarget(request.GetTag())
+			if err != nil {
+				newError("unable to obtain principle target").Base(err).AtInfo().WriteToLog()
+			} else {
+				ret.Balancer.PrincipleTarget = &PrincipleTargetInfo{Tag: res}
+			}
+		}
+	}
+	return &ret, nil
+}
+
+func (s *routingServer) OverrideBalancerTarget(ctx context.Context, request *OverrideBalancerTargetRequest) (*OverrideBalancerTargetResponse, error) {
+	if bo, ok := s.router.(routing.BalancerOverrider); ok {
+		return &OverrideBalancerTargetResponse{}, bo.SetOverrideTarget(request.BalancerTag, request.Target)
+	}
+	return nil, newError("unsupported router implementation")
 }
 
 // NewRoutingServer creates a statistics service with statistics manager.

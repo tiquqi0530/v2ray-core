@@ -11,25 +11,27 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc"
-	"v2ray.com/core"
-	"v2ray.com/core/app/commander"
-	"v2ray.com/core/app/policy"
-	"v2ray.com/core/app/proxyman"
-	"v2ray.com/core/app/proxyman/command"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/app/stats"
-	statscmd "v2ray.com/core/app/stats/command"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/serial"
-	"v2ray.com/core/common/uuid"
-	"v2ray.com/core/proxy/dokodemo"
-	"v2ray.com/core/proxy/freedom"
-	"v2ray.com/core/proxy/vmess"
-	"v2ray.com/core/proxy/vmess/inbound"
-	"v2ray.com/core/proxy/vmess/outbound"
-	"v2ray.com/core/testing/servers/tcp"
+	"google.golang.org/protobuf/types/known/anypb"
+
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/app/commander"
+	"github.com/v2fly/v2ray-core/v4/app/policy"
+	"github.com/v2fly/v2ray-core/v4/app/proxyman"
+	"github.com/v2fly/v2ray-core/v4/app/proxyman/command"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/app/stats"
+	statscmd "github.com/v2fly/v2ray-core/v4/app/stats/command"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/common/uuid"
+	"github.com/v2fly/v2ray-core/v4/proxy/dokodemo"
+	"github.com/v2fly/v2ray-core/v4/proxy/freedom"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/inbound"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess/outbound"
+	"github.com/v2fly/v2ray-core/v4/testing/servers/tcp"
 )
 
 func TestCommanderRemoveHandler(t *testing.T) {
@@ -43,10 +45,10 @@ func TestCommanderRemoveHandler(t *testing.T) {
 	clientPort := tcp.PickPort()
 	cmdPort := tcp.PickPort()
 	clientConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&commander.Config{
 				Tag: "api",
-				Service: []*serial.TypedMessage{
+				Service: []*anypb.Any{
 					serial.ToTypedMessage(&command.Config{}),
 				},
 			}),
@@ -141,10 +143,10 @@ func TestCommanderAddRemoveUser(t *testing.T) {
 	cmdPort := tcp.PickPort()
 	serverPort := tcp.PickPort()
 	serverConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&commander.Config{
 				Tag: "api",
-				Service: []*serial.TypedMessage{
+				Service: []*anypb.Any{
 					serial.ToTypedMessage(&command.Config{}),
 				},
 			}),
@@ -209,7 +211,7 @@ func TestCommanderAddRemoveUser(t *testing.T) {
 
 	clientPort := tcp.PickPort()
 	clientConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&policy.Config{
 				Level: map[uint32]*policy.Policy{
 					0: {
@@ -282,7 +284,7 @@ func TestCommanderAddRemoveUser(t *testing.T) {
 		Operation: serial.ToTypedMessage(
 			&command.AddUserOperation{
 				User: &protocol.User{
-					Email: "test@v2ray.com",
+					Email: "test@v2fly.org",
 					Account: serial.ToTypedMessage(&vmess.Account{
 						Id:      u2.String(),
 						AlterId: 64,
@@ -301,7 +303,7 @@ func TestCommanderAddRemoveUser(t *testing.T) {
 
 	resp, err = hsClient.AlterInbound(context.Background(), &command.AlterInboundRequest{
 		Tag:       "v",
-		Operation: serial.ToTypedMessage(&command.RemoveUserOperation{Email: "test@v2ray.com"}),
+		Operation: serial.ToTypedMessage(&command.RemoveUserOperation{Email: "test@v2fly.org"}),
 	})
 	common.Must(err)
 	if resp == nil {
@@ -322,11 +324,11 @@ func TestCommanderStats(t *testing.T) {
 	cmdPort := tcp.PickPort()
 
 	serverConfig := &core.Config{
-		App: []*serial.TypedMessage{
+		App: []*anypb.Any{
 			serial.ToTypedMessage(&stats.Config{}),
 			serial.ToTypedMessage(&commander.Config{
 				Tag: "api",
-				Service: []*serial.TypedMessage{
+				Service: []*anypb.Any{
 					serial.ToTypedMessage(&statscmd.Config{}),
 				},
 			}),
